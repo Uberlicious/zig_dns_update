@@ -3,12 +3,14 @@ const c = @cImport({
     @cInclude("syslog.h");
 });
 
+const Allocator = std.mem.Allocator;
+
 const cloudflare = @import("cloudflare.zig");
 const CloudflareClient = cloudflare.CloudflareClient;
+const AsusRouter = @import("asus_router.zig").AsusRouter;
 
 var syslog_initialized: bool = false;
 
-const Allocator = std.mem.Allocator;
 pub const log_level = .err;
 pub const std_options = .{
     .logFn = log,
@@ -74,7 +76,6 @@ pub fn log(
 // caller must deinit map result
 pub fn GetEnv(allocator: Allocator) !std.StringHashMap([]const u8) {
     // const log_scoped = std.log.scoped(.GetEnv);
-    // const f = try std.fs.openFileAbsolute("/Users/uber/code/zig/dns_update/.env", .{});
     const f: std.fs.File = try std.fs.cwd().openFile(".env", .{});
 
     const contents = try f.readToEndAlloc(allocator, 4096);
@@ -106,50 +107,62 @@ pub fn main() !void {
 
     var env_vars = try GetEnv(allocator);
     defer env_vars.deinit();
-    const api_key = env_vars.get("cloudflare_api_key") orelse return error.NoApiKeyProvided;
-    const domain = env_vars.get("domain") orelse return error.NoDomainProvided;
+    // const api_key = env_vars.get("cloudflare_api_key") orelse return error.NoApiKeyProvided;
+    // const domain = env_vars.get("domain") orelse return error.NoDomainProvided;
 
-    const cfClient = CloudflareClient.init(api_key);
-    const zoneResponse = try cfClient.get(
-        allocator,
-        cloudflare.ListZonesResponse,
-        "https://api.cloudflare.com/client/v4/zones",
-    );
-    defer zoneResponse.deinit();
+    // const cfClient = CloudflareClient.init(api_key);
+    // const zoneResponse = try cfClient.get(
+    //     allocator,
+    //     cloudflare.ListZonesResponse,
+    //     "https://api.cloudflare.com/client/v4/zones",
+    // );
+    // defer zoneResponse.deinit();
 
-    var zone_id: ?[]const u8 = undefined;
-    for (zoneResponse.value.result) |zone| {
-        if (std.mem.eql(u8, zone.name, domain)) {
-            zone_id = zone.id;
-        }
-    }
+    // var zone_id: ?[]const u8 = undefined;
+    // for (zoneResponse.value.result) |zone| {
+    //     if (std.mem.eql(u8, zone.name, domain)) {
+    //         zone_id = zone.id;
+    //     }
+    // }
 
-    if (zone_id == null) {
-        return error.NoDomainFound;
-    }
+    // if (zone_id == null) {
+    //     return error.NoDomainFound;
+    // }
 
-    const recordResponse = try cfClient.get(
-        std.heap.page_allocator,
-        cloudflare.ListRecordsReponse,
-        try std.fmt.allocPrint(allocator, "https://api.cloudflare.com/client/v4/zones/{s}/dns_records?type=A", .{zone_id.?}),
-    );
-    defer recordResponse.deinit();
+    // const recordResponse = try cfClient.get(
+    //     std.heap.page_allocator,
+    //     cloudflare.ListRecordsReponse,
+    //     try std.fmt.allocPrint(allocator, "https://api.cloudflare.com/client/v4/zones/{s}/dns_records?type=A", .{zone_id.?}),
+    // );
+    // defer recordResponse.deinit();
 
-    const currentIp = try GetIp(allocator);
+    // const currentIp = try GetIp(allocator);
 
-    for (recordResponse.value.result) |record| {
-        if (std.mem.eql(u8, record.content orelse "", currentIp)) {
-            std.log.info("no update needed - name: {s}", .{record.name.?});
-        } else {
-            std.log.info("update required - name: {s} old_ip: {s} new_ip: {s}", .{record.name.?, record.content.?, currentIp});
-            const newRecord = cloudflare.Record{
-                .content = currentIp,
-            };
-            try cfClient.c_patch(
-                allocator,
-                newRecord,
-                try std.fmt.allocPrint(allocator, "https://api.cloudflare.com/client/v4/zones/{s}/dns_records/{s}", .{ zone_id.?, record.id.? }),
-            );
-        }
-    }
+    // for (recordResponse.value.result) |record| {
+    //     if (std.mem.eql(u8, record.content orelse "", currentIp)) {
+    //         std.log.info("no update needed - name: {s}", .{record.name.?});
+    //     } else {
+    //         std.log.info("update required - name: {s} old_ip: {s} new_ip: {s}", .{record.name.?, record.content.?, currentIp});
+    //         const newRecord = cloudflare.Record{
+    //             .content = currentIp,
+    //         };
+    //         try cfClient.c_patch(
+    //             allocator,
+    //             newRecord,
+    //             try std.fmt.allocPrint(allocator, "https://api.cloudflare.com/client/v4/zones/{s}/dns_records/{s}", .{ zone_id.?, record.id.? }),
+    //         );
+    //     }
+    // }
+
+    // check for AsusRouter Vars
+    const router_ip = env_vars.get("router_ip") orelse return error.NoRouterIPProvided;
+    const router_user = env_vars.get("router_user") orelse return error.NoRouterUserProvided;
+    const router_password = env_vars.get("router_password") orelse return error.NoRouterPasswordProvided;
+
+    var router = AsusRouter.init(allocator, router_ip);
+    std.debug.print("IP: {s}\n", .{router.ip});
+    // defer router.deinit();
+
+    try router.login(router_user, router_password);
+    std.debug.print("\u{001b}[36mTokenHeader: {s}", .{router.token_header});
 }
